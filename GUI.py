@@ -1,29 +1,25 @@
-import datetime
+from data import Reader
+from datetime import datetime 
 from typing import Container
 #import led info, replace with relay info
 #from gpiozero import PWMLED
 #LED1 = PWMLED(17)
-#import DataLogger.py
-from DataLogger import DataLogger
 #import tkinter for GUI
 import tkinter as tk
 from tkinter import ttk, W, LEFT, END
 #font types
-TITLE_FONT = ("Verdana", 14,) #"bold")
+TITLE_FONT = ("Verdana", 14, 'bold')
 LARGE_FONT = ("Verdana", 12)
 MEDIUM_FONT = ("Verdana", 10)
 SMALL_FONT = ("Verdana", 8)
 #import stuff for graph
+import csv
 import matplotlib
 from matplotlib import ticker as mticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk 
 matplotlib.use('TkAgg')
 from matplotlib import figure
 from matplotlib import dates as mdates
-import csv
-#import/enable garbage collector to clear memory
-import gc
-gc.enable()
 #import animation to make graph live
 import matplotlib.animation as animation
 from matplotlib import style
@@ -32,9 +28,12 @@ style.use("seaborn-darkgrid")
 from vertical_scroll_frame import VerticalScrolledFrame
 
 from main import user_settings
-config_path, file_path = user_settings()
+config_path, db_path = user_settings()
 
-#initialize channel_buttons_config & entry configs
+#initialize channel_buttons_config, entry configs, and SQLite reader
+db_name = 'sensor_testdb.db'
+reader = Reader(db_path, db_name)
+
 with open(config_path, "r") as file:
     config_settings = list(csv.reader(file))
     if len(config_settings) != 5:
@@ -48,104 +47,99 @@ with open(config_path, "r") as file:
             writer.writerows([channel_buttons_config,on_config,off_config, upper_config, lower_config])
             config_settings = [channel_buttons_config,on_config,off_config, upper_config, lower_config]
             file.flush()
+    channel_buttons_config = config_settings[0]
+    on_config = config_settings[1]
+    off_config = config_settings[2]
+    upper_config = config_settings[3]
+    lower_config = config_settings[4]
 #create figure for plots and set figure size/layout
 f = figure.Figure(figsize=(8.6,17.5), dpi=100)
+f.subplots_adjust(top=0.993, bottom=0.015, hspace=0.4)
 
-f.subplots_adjust(top=0.993, bottom=0.015)
-#plots
-plot1 = f.add_subplot(6,2,1)
-plot2 = f.add_subplot(6,2,2)
-plot3 = f.add_subplot(6,2,3)
-plot4 = f.add_subplot(6,2,4)
-plot5 = f.add_subplot(6,2,5)
-plot6 = f.add_subplot(6,2,6)
-plot7 = f.add_subplot(6,2,7)
-plot8 = f.add_subplot(6,2,8)
-plot9 = f.add_subplot(6,2,9)
-plot10 = f.add_subplot(6,2,10)
-plot11 = f.add_subplot(6,2,11)
-axes = f.get_axes()
-
-#animate function
-def animate(ii):
-    with open(config_path, "r") as file:
-         config_settings = list(csv.reader(file))
-    with open(file_path, "r") as file:
-        pullData = file.read()
-        dataList = pullData.split('\n')
-        reader_file = csv.reader(file)
-        dataLen = len(list(reader_file))
-    #setting timeframe and making sure GUI runs on short CSVs too
-    if dataLen < 240:
-        timeframe = -dataLen
-    else:
-        timeframe = int(-240)
-
-    #make all the x and y variable lists
-    dataList = dataList[timeframe:]
-    tList = []
-    v_phList = []
-    v_tempList = []
-    graph_color_ph = 'b'
-    graph_color_temp = 'b'
-    for eachLine in dataList:
-        if len(eachLine) > 1:
-            timedate, voltage_ph, voltage_temp = eachLine.split(',')
-            tList.append(datetime.datetime.strptime(timedate, "%m/%d/%Y %H:%M:%S"))
-            v_phList.append(float(voltage_ph))
-            v_tempList.append(float(voltage_temp))
-            #keep the lists to a reasonable length to save memory
-            tList = tList[timeframe:]
-            v_phList = v_phList[timeframe:]
-            v_tempList = v_tempList[timeframe:]
-            if float(voltage_ph) > float(config_settings[3][0]) or float(voltage_ph) < float(config_settings[4][0]):
-                graph_color_ph = 'r'
-            else:
-                graph_color_ph = 'g'
-            if float(voltage_temp) > float(config_settings[3][8]) or float(voltage_temp) < float(config_settings[4][8]):
-                graph_color_temp = 'r'
-            else:
-                graph_color_temp = 'g' 
-
-    #plot graphs
-    plot1.clear()
-    plot2.clear()
-    listofzeros = [0] * len(tList)
-    #add labels and config axis
-    for ax in axes:
-        ax.xaxis_date()
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%I:%M:%S %p'))  
-        [tk.set_visible(True) for tk in ax.get_xticklabels()]
-        [label.set_rotation(10) for label in ax.xaxis.get_ticklabels()] #slant the x axis tick labels for extra coolness
-        ax.set_xlim(tList[int(timeframe/2)], tList[-1])
-        ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=4))  #make sure the xticks aren't overlapping
+param_dict = {}
+param_list = ['pH', 'TDS (ppm)', 'Relative Humidity (%)', 'Air Temp (C)', 'Water Temp (C)', 'Distance']
+#param_list = ['pH', 'Water Temp', 'Air Temp', 'Nitrate', 'TDS', 'DO', 'Ammonia', 'Phosphate', 'Humidity', 'Flow Rate', 'Water Level']
+live_dict = {}
+class Live_Text:
+    def __init__(self, label):
+        self.label = label
     
-    plot1.set_ylabel("pH (v)")
-    plot1.set_ylim(2,4)
-    plot2.set_ylabel("Temperature (v)")
-    plot2.set_ylim(0,5)
-    #show half the length of our timeframe, set functionality to let user scroll
-    #to next half later
-    plot1.set_xlim(tList[int(timeframe/2)], tList[-1])
-    plot2.set_xlim(tList[int(timeframe/2)], tList[-1])
-    #slant the x axis tick labels for extra coolness
-    for label in plot1.xaxis.get_ticklabels():
-        label.set_rotation(10)
-    for label in plot2.xaxis.get_ticklabels():
-        label.set_rotation(10)
-    #make sure the xticks aren't overlapping
-    plot1.xaxis.set_major_locator(mticker.MaxNLocator(nbins=4))
-    plot2.xaxis.set_major_locator(mticker.MaxNLocator(nbins=4))
+class Sensor_Plot:
+    def __init__(self, plot, tList, x_ax, param, incoming_data, plot_color):
+        self.plot = plot
+        self.tList = tList
+        self.x_ax = x_ax
+        self.param = param
+        self.incoming_data = incoming_data #<- graph is bound by incoming data and Data Summary Table displays most recent value 20 of them
+        self.plot_color = plot_color #initially 'b' for all
+        
+    def make_plot(self):
 
-    plot1.fill_between(tList, v_phList,
-                       where=(v_phList > listofzeros),
-                       facecolor = graph_color_ph, edgecolor = graph_color_ph, alpha = 0.5)
-    plot2.fill_between(tList, v_tempList,
-                       where=(v_tempList > listofzeros),
-                       facecolor = graph_color_temp, edgecolor = graph_color_temp, alpha = 0.5)
+        self.plot.clear()
+        self.plot.set_xlabel('Time')
+        self.plot.set_ylabel(self.param)
+        # plot.set_ylim(ylim) #UNIQUE BUT HOW?
 
-    #collect garbage
-    gc.collect()
+        self.x_ax.xaxis_date()
+        self.x_ax.xaxis.set_major_formatter(mdates.DateFormatter('%I:%M:%S %p'))
+        
+        [tk.set_visible(True) for tk in self.x_ax.get_xticklabels()]
+        [label.set_rotation(10) for label in self.x_ax.xaxis.get_ticklabels()] #slant the x axis tick labels for extra coolness
+
+#        self.plot.set_xlim(self.tList[-2], self.tList[0])
+        self.x_ax.set_xlim(self.tList[-2], self.tList[0]) 
+        self.x_ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins = 4))
+        
+        self.plot.fill_between(self.tList, self.incoming_data, #where=(self.incoming_data > [0]*len(self.incoming_data))
+                               facecolor=self.plot_color, edgecolor=self.plot_color, alpha=0.5) #blue @initilization
+
+
+most_recent = reader.get_timeset(table="SensorData", num=20)
+#print("most recent", most_recent)
+reader.commit()       
+for i, param in enumerate(param_list, 1): 
+    tList = []
+    most_recent_20 = []
+    for j in range(len(most_recent)):
+        time_f = datetime.strptime(most_recent[j][0], "%m/%d/%Y %H:%M:%S")
+        tList.append(time_f)
+        most_recent_20.append(most_recent[j][i])
+    
+    subplot = f.add_subplot(6, 2, i) #sharex?
+    x_ax = f.get_axes()
+    current_plot = Sensor_Plot(subplot, tList, x_ax[i-1], param, most_recent_20, 'b')      
+    param_dict[param] = current_plot
+    current_plot.make_plot()
+
+    
+###ANIMATE FUNCTION, REMOVE LAST ITEM FROM MOST_RECENT_2O LIST AND INSERT FRESHLY CALLED VALUE TO INDEX[1]
+def animate(ii):
+    most_recent = reader.get_timeset(table="SensorData", num=1)
+    reader.commit()
+    if most_recent != None:
+        with open(config_path, "r") as file:
+            config_settings = list(csv.reader(file))
+        for i, key in enumerate(param_dict, 1):
+            current_plot = param_dict[key]
+            current_param_val = float(most_recent[0][i])
+            current_text = live_dict[key]
+            if current_param_val > float(config_settings[3][i]) or current_param_val < float(config_settings[4][i]):
+                current_text.label.config(text=most_recent[0][i], fg="red", bg="white")
+                current_plot.plot_color = 'r'
+            else:
+                current_text.label.config(text=most_recent[0][i], fg="black", bg="white")
+                current_plot.plot_color = 'g'
+            
+            data_stream = current_plot.incoming_data
+            time_stream = current_plot.tList
+            data_stream.pop()
+            time_stream.pop()
+            data_stream.insert(0, most_recent[0][i])
+            time_f = datetime.strptime(most_recent[0][0], "%m/%d/%Y %H:%M:%S")
+            time_stream.insert(0, time_f)
+            current_plot.make_plot()
+            
+           
 #initialization
 class AllWindow(tk.Tk):
     def __init__(self, *args, **kwargs):
@@ -187,6 +181,7 @@ class AllWindow(tk.Tk):
     #end program fcn triggered by quit button
     def die(self):
         exit()
+
 #add home page
 class HomePage(tk.Frame):
     def __init__(self, parent, controller):
@@ -196,6 +191,7 @@ class HomePage(tk.Frame):
         scframe.place(x=130, y=40)
         #bring up canvas with plot in the frame with vertical scroll bar
         canvas = FigureCanvasTkAgg(f, scframe.interior)
+        background = canvas.copy_from_bbox(f.bbox)
         canvas.draw()
         #create title label
         label = tk.Label(self, text="Dashboard", bg='white', font = TITLE_FONT)
@@ -206,131 +202,23 @@ class HomePage(tk.Frame):
         toolbar = NavigationToolbar2Tk(canvas, self)
         toolbar.update()
         #color variables
-        pHcolor = "white"
         #data table labels
         table_title = tk.Label(self, text="Data Summary", bg="white", font = LARGE_FONT)
         table_title.place(x=28, y=40)
-        leak_label = tk.Label(self, text="Leakage", fg="black", bg=pHcolor,
+        for i, param in enumerate(param_list): #tk.Label self refers to Homepage
+            param_label = tk.Label(self, text=param, fg="black", bg="white",
                             font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        leak_label.place(x=5, y=65)
-        waterlvl_label = tk.Label(self, text="Water Level", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        waterlvl_label.place(x=5, y=87)
-        pH_label = tk.Label(self, text="pH", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        pH_label.place(x=5, y=109)
-        wtemp_label = tk.Label(self, text="Water Temp", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        wtemp_label.place(x=5, y=131)
-        atemp_label = tk.Label(self, text="Air Temp", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        atemp_label.place(x=5, y=153)
-        NO3_label = tk.Label(self, text="Nitrate", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        NO3_label.place(x=5, y=175)
-        TDS_label = tk.Label(self, text="TDS", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        TDS_label.place(x=5, y=197)
-        DO_label = tk.Label(self, text="DO", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        DO_label.place(x=5, y=219)
-        NH3_label = tk.Label(self, text="Ammonia", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        NH3_label.place(x=5, y=241)
-        PO4_label = tk.Label(self, text="Phosphate", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        PO4_label.place(x=5, y=263)
-        humidity_label = tk.Label(self, text="Humidity", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        humidity_label.place(x=5, y=285)
-        flowrate_label = tk.Label(self, text="Flow Rate", fg="black", bg=pHcolor,
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1, anchor=W, justify=LEFT)
-        flowrate_label.place(x=5, y=307)
-        #updating live texts
-        leak_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        leak_data.place(x=91, y=65)
-        waterlvl_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        waterlvl_data.place(x=91, y=87)
-        pH_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        pH_data.place(x=91, y=109)
-        wtemp_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        wtemp_data.place(x=91, y=131)
-        atemp_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        atemp_data.place(x=91, y=153)
-        NO3_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        NO3_data.place(x=91, y=175)
-        TDS_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        TDS_data.place(x=91, y=197)
-        DO_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        DO_data.place(x=91, y=219)
-        NH3_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        NH3_data.place(x=91, y=241)
-        PO4_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        PO4_data.place(x=91, y=263)
-        humidity_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        humidity_data.place(x=91, y=285)
-        flowrate_data = tk.Label(self, text="Loading", fg="black", bg="white",
-                            font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
-                            width=10, height=1)
-        flowrate_data.place(x=91, y=307)
-#function to update live text
-        def GetValues():
-            with open(config_path, "r") as file:
-                config_settings = list(csv.reader(file))
-            with open(file_path, "r") as file:
-                pullData = file.read()
-                dataList = pullData.split('\n')
-                for eachLine in dataList:
-                    if len(eachLine) > 1:
-                        #add to this list of data read as we add more sensors
-                        timedate, voltage_ph, voltage_temp = eachLine.split(',')
-                        if float(voltage_ph) > float(config_settings[3][0]) or float(voltage_ph) < float(config_settings[4][0]):
-                            pH_data.config(text = voltage_ph, fg="red", bg="white")
-                        else:
-                            pH_data.config(text=voltage_ph, fg = "black", bg="white")
-                        
-                        if float(voltage_temp) > float(config_settings[3][8]) or float(voltage_temp) < float(config_settings[4][8]):
-                            wtemp_data.config(text=voltage_temp, fg="red", bg = "white")
-                        else:
-                            wtemp_data.config(text = voltage_temp, fg = "black", bg="white")
-            gc.collect()
-            self.after(5000, GetValues)
-        self.after(5000, GetValues)
+                            width=18, height=1, anchor=W, justify=LEFT)
+            param_label.place(x=5, y=65+22*i)
 
+        for i, param in enumerate(param_list):
+            loading_text = tk.Label(self, text="Loading", fg="black", bg="white",
+                    font = MEDIUM_FONT, borderwidth = 2, relief = "ridge",
+                    width=5, height=1)
+            loading_text.place(x=156, y=65+22*i)
+            current_text = Live_Text(loading_text)
+            live_dict[param] = current_text
+        
 channel_count = []
 button_count = []
 on_times = []
@@ -356,16 +244,19 @@ class ControlPanel(tk.Frame):
         self.discardButton= ttk.Button(self, text="Discard", command=self.discard)
         self.discardButton.grid(row=3, columnspan=14, pady=(0,20))
         
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(13, weight=1)
+        
         def preconfig_label(count: str):
             return tk.Label(self, text=count, bg='white', font=SMALL_FONT)
         for count in range(1, 17):
             channel_count.append(preconfig_label(str(count)))
-                                
-        def preconfig_button():
-            return tk.Button(self, text="Channel OFF", bg= "red", fg= "white", width=10, 
-                             height=1, command=self.get_channel_state)
+    
+        preconfig_button = tk.Button(self, text="Channel OFF", bg= "red", fg= "white", width=10, 
+                           height=1, command=self.get_channel_state) #command will change state
         for count in range(16):
-            button_count.append(preconfig_button())
+            button_count.append(preconfig_button)
+        
         
         #Labels, buttons, and entries, oh my!
         for i in range(16):
@@ -419,9 +310,10 @@ class ControlPanel(tk.Frame):
                 off_element.grid(row=row, column=6) #off entry
         #Tells user what to input
         tk.Label(self, text="*Input Time in Hours", bg="white").grid(row=12, columnspan=14)
-
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(13, weight=1)
+        
+        self.discard()
+        
+        
 
     #fcn triggered by save button
     def popup(self):
@@ -480,7 +372,6 @@ class ControlPanel(tk.Frame):
                 off_buttons[i].delete(0, END)
                 on_buttons[i].insert(0, config_settings[1][i])  
                 off_buttons[i].insert(0, config_settings[2][i])
-        gc.collect()
     
     def get_channel_state(self):
         #ugh, try......counter ??? what the fuck.
@@ -504,8 +395,7 @@ class ControlPanel(tk.Frame):
                 button_count[i].configure(text = "Channel OFF")
                 channel_buttons_config[i] = -1
                 continue
-    
-#add settings page
+
 class Settings(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent)
@@ -652,7 +542,7 @@ class Settings(tk.Frame):
 
         self.grid_columnconfigure(0, weight=2)
         self.grid_columnconfigure(5, weight=3)
-        #self.discard() #DO NOT run discard to initialize values, instead have an initialization?? or better yet, get the values from the config file because if we're using this, it should load the last saved config file settings and display that!
+        self.discard()
         #Tells user what to input
         tk.Label(self, text="*Enter Min/Max Values For The Specified Parameters", bg="white").grid(row=15, columnspan=14, pady=(10,0))
 
@@ -758,8 +648,7 @@ class Settings(tk.Frame):
             self.Water_Temperature_lower_entry.insert(0, config_settings[4][8])
             self.Water_Level_lower_entry.insert(0, config_settings[4][9])
             self.Flow_Rate_lower_entry.insert(0, config_settings[4][10])
-            gc.collect()
-       
+
 #add Video Stream page
 class VideoStream(tk.Frame):
     def __init__(self, parent, controller):

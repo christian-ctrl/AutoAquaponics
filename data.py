@@ -1,30 +1,9 @@
 import random
 import sqlite3
-import random
-from sqlite3.dbapi2 import Error
 import numpy as np
 from datetime import datetime
 from time import sleep
 import os
-
-cwd0 = os.getcwd()
-tgt_dir = "C:/Users/markg/Repositories/AutoAquaponics" 
-db_name = 'testdb.db'
-
-#NEW TABLE DATA data column NAMES and data column TYPES tuple'd together inside a dictionary
-data_names = ('time','pH','Water_Temp','Air_Temp','Nitrate','TDS','DO','Ammonia','Phosphate','Humidity','Flow_rt')
-data_types = ("datetime","float","float","float","float","float","float","float","float","float","float")
-
-new_table = {'goopygoop':(data_names,data_types)} #TO DO: make work for 
-
-
-#input data function, analogous to getdata()
-choice = [0,1,2,3,4,5,6,7,8,9]
-def data_in():
-    return (random.choice(choice),random.choice(choice),random.choice(choice),
-            random.choice(choice),random.choice(choice),random.choice(choice),
-            random.choice(choice),random.choice(choice),random.choice(choice),
-            random.choice(choice))
 
 class Logger:
     def __init__(self,tgt_path,database):
@@ -41,12 +20,9 @@ class Logger:
         os.chdir(tgt_path)
 
         ## INITIALIZING DATABASE
-        #first, keeping note of whether a database exists yet in the directory (to print an alert later)
-        if os.path.isfile(self.dbname):
-            newdb = False
-        else:
-            newdb = True 
-        
+        #first, keeping note of whether a database exists yet in the directory
+        #(to print an alert later) 
+        newdb = not os.path.isfile(self.dbname)
         #sqlite connection and cursor... (this will make a new database dbname.db if none exists)
         self.conn = sqlite3.connect(self.dbname)
         self.c = self.conn.cursor()
@@ -72,11 +48,11 @@ class Logger:
         if type(newtable).__name__=="dict":
             for a,b in newtable.items():
                 if len(b[0]) != len(b[1]):
-                    print(f'ALERT: table {a} has a different number of column names and column types')
+                    print('ALERT: table {a} has a different number of column names and column types')
         #elif list(newtable.keys())[0] == 'DAILY':
         #    # implement DAILY TABLE!
-        else: print('ALERT: You must input a table dictionary')
-
+        else:
+            print('ALERT: You must input a table dictionary')
         ## MAKING A TABLE IF IT DOESN'T EXIST
         #translating datatypes from python to sqlite3
         types = {   "int":"""INTEGER""","float":"""REAL""",
@@ -91,7 +67,8 @@ class Logger:
             i = 0 #index
             for name in info[0]: #looping over the table names for this table
                 key = info[1][i] #getting the datatype for translation via the types dictionary
-                names += f"""{name} {types[key]}, """
+                names += "{} {},".format(name, types[key])
+                #names += """{name} {types[key]}, """
                 i += 1
             names = names[:-2] + """)""" #deletes the last ', ' and adds ')'
             
@@ -106,12 +83,8 @@ class Logger:
         if table == 'DAILY':
             table = self.datef
 
-        #check if table exists...
-        if table not in self.dbtables:
-            print(f'The table {table} is not defined. Use Logger.table to define one')
-
-        #time-controlled data collection (Running average. tsamp = time between measurements
-        #                                                  nsamp = number of measurements)
+        #time-controlled data collection 
+        # (Running average. tsamp = time between measurements, nsamp = number of measurements)
         
         #data is stored in a numpy array...
         leng = len(dataget())
@@ -119,7 +92,6 @@ class Logger:
         ct = 0
         while ct < nsamp:
             tup_arr = np.asarray([dataget()]) #put the getdata() into array form
-            print(tup_arr)
             data_arr = np.append(data_arr, tup_arr, axis=0) #append as new row in the array
             ct += 1
             sleep(tsamp)
@@ -128,59 +100,35 @@ class Logger:
         data_avg = tuple(data_arr.sum(axis=0)/nsamp)
 
         #adding the timestamp
-        data_log = (datetime.now(),*data_avg)
+        data_log = (datetime.now().strftime("%m/%d/%Y %H:%M:%S"),) + data_avg
+        print(data_log)
 
-        #collect data, datanames and assign to data dict
-        self.data_dict[table] = data_log
-        print(self.data_dict)
+        #assign data to tables in data_dict
+        if table not in self.data_dict:
+            self.data_dict[table] = []
+        self.data_dict[table].append(data_log)
 
-    def log_data_old(self,table):
-        #daily table
-        if table == 'DAILY':
-            table = self.datef
-        
-        #sqlite connection and cursor
-        conn = sqlite3.connect(self.dbname)
-        c = conn.cursor()
-        
-        ## MAKING A TABLE IF IT DOESN'T EXIST
-        #translating datatypes from python to sqlite3
-        types = {"int":"""INTEGER""","float":"""REAL""","float64":"""REAL""","str":"""TEXT""","datetime":"""REAL"""}
-        
-        #generating a string for table generation
-        names = """("""
-        i = 0 #index
-        for name in self.table_dict[table][0]: #looping over the table names for this table
-            key = type(self.data_dict[table][i]).__name__ #getting the datatype for translation via the types dictionary
-            names += f"""{name} {types[key]}, """
-            i += 1
-        names = names[:-2] + """)""" #deletes the last ', ' and adds ')'
-        
-        #Create table if not yet defined, with the following columns...
-        c.execute("""CREATE TABLE IF NOT EXISTS """ + table + names)
-        
-        ## LOGGING
-        for tbl, data in self.data_dict.items():
-            cnt = len(data) - 1
-            params = '?' + ',?'*cnt
-            c.execute(f"INSERT INTO {tbl} VALUES({params})",data) #pushes values into database (dictionary format)
-            conn.commit()
-
-        #close sqlite connection
-        conn.close()
 
     def log_data(self):
         
         ## LOGGING
         for tbl, data in self.data_dict.items(): #FOR ALL DATA IN DICT
-            cnt = len(data) - 1
-            params = '?' + ',?'*cnt
-            self.c.execute(f"INSERT INTO {tbl} VALUES({params})",data) #pushes values into database (dictionary format)
-            self.conn.commit()
+            for rdg in data:
+                cnt = len(rdg) - 1
+                params = '?' + ',?'*cnt
+                self.c.execute("INSERT INTO {} VALUES({})".format(tbl, params),rdg) #pushes values into database (dictionary format)
+                self.conn.commit()
+        
+        #empty the data dictionary
+        self.data_dict = {}
 
     def close(self):
         #close sqlite connection
         self.conn.close()
+    
+    def commit(self):
+        #commit sqlite transaction
+        self.conn.commit()
     
 class Reader:
     def __init__(self,tgt_path,database):
@@ -191,10 +139,7 @@ class Reader:
 
         ## INITIALIZING DATABASE
         #first, keeping note of whether a database exists yet in the directory
-        if os.path.isfile(self.dbname):
-            newdb = False
-        else:
-            newdb = True 
+        newdb = not os.path.isfile(self.dbname)
         
         #Create an alert for when a new database is being made
         if newdb:
@@ -209,33 +154,18 @@ class Reader:
         self.c.execute("""SELECT * FROM """ + table)
         
         #return a list...
-        print(self.c.fetchall())
+        return self.c.fetchall()
+        #print(self.c.fetchall())
     
     def get_timeset(self,table,num = 1,timeval = None):
-        self.c.execute(f"""SELECT * FROM {table} ORDER BY time DESC LIMIT {num}""")
-        print(self.c.fetchall())
+        self.c.execute("SELECT * FROM {} ORDER BY time DESC LIMIT {}".format(table, num))
+        return self.c.fetchall()
+        #print(self.c.fetchall())
 
     def close(self):
         #close sqlite connection
         self.conn.close()
-
-def main():
-
-    moop_table = {'moop':(data_names,data_types)}
-    logger = Logger(tgt_dir,db_name) 
-    logger.table(moop_table) 
-
-    cnt = 0
-    while cnt<5: #would be a while true statement if I wasn't testing
         
-        logger.collect_data('moop',data_in,tsamp=1,nsamp=5)
-        logger.log_data() #TO DO: TAKE OUT OF LOOP
-        cnt = cnt+1
-
-    logger.close()
-
-    reader = Reader(tgt_dir,db_name)
-    reader.get_timeset('moop')
-    reader.close()
-
-main()
+    def commit(self):
+        #commit sqlite transaction
+        self.conn.commit()

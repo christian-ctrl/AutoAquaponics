@@ -4,13 +4,11 @@ from multiprocessing import Process
 
 global IS_ALIVE
 IS_ALIVE = True
-    
-testfile_name = "test4.csv"
 
 # Set your own file path & config path in file setup.json
 # or as environment variables AQUA_testfile_dir, AQUA_config_file
 _config_file = None
-_testfile_dir = None
+_tgt_db_dir = None
 
 def _load_setting_json(json_file_str, json_var):
     from os import path
@@ -21,38 +19,35 @@ def _load_setting_json(json_file_str, json_var):
             result = json_load(json_file).get(json_var)
     return result
 
-# Set your own file path & config path in file setup.json
-# or as environment variables AQUA_testfile_dir, AQUA_config_file
+# Set your own config path & database path in file setup.json
+# or as environment variables AQUA_tgt_db_dir, AQUA_config_file
 def load_setting(envir_var: str, setup_file: str, json_var: str, default_return_value: str):
     from os import environ
     yield environ.get(envir_var)
     yield _load_setting_json(setup_file, json_var)
     yield default_return_value
 
-_config_file = None
-_testfile_dir = None
 def user_settings():
     from os import path
     for config_path_location in load_setting("AQUA_config_file", "setup.json", "config_file", "./config.csv"):
         if config_path_location != None:
             _config_file = config_path_location
             break
-    for test_path_location in load_setting("AQUA_testfile_dir", "setup.json", "testfile_dir", "./"):
-        if test_path_location != None:
-            _testfile_dir = test_path_location
-            _testfile_path = path.join(test_path_location, testfile_name)
-            break  
+    for db_path_location in load_setting("AQUA_tgt_db_dir", "setup.json", "db_dir", "./"):
+        if db_path_location != None:
+            _tgt_db_dir = db_path_location
+            break
     if not path.exists(_config_file):
         with open(_config_file, "a+") as _:
             pass  
-    return _config_file, _testfile_path
+    return _config_file, _tgt_db_dir
 
 def start_GUI():
     import GUI
 
 def start_data_logging():
-    from fakeDataLogger import fakeDataLogger
-    fakeDataLogger(testfile_name)
+    from DataLogger import DataLogger
+    DataLogger()
 
 if(__name__ == '__main__'):
     p1 = Process(target=start_data_logging)
@@ -61,20 +56,10 @@ if(__name__ == '__main__'):
     p2.daemon = True
     #start data logging
     p1.start()
-    
-    config_file, testfile_path = user_settings()
-    from os import path
-    if not path.exists(testfile_path):
-        with open(testfile_path, "a+") as _:
-            pass
-    
-    #check length of CSV and wait for data logger to populate if it's too small
-    with open (testfile_path, "r") as input_file:
-        reader_file = csv.reader(input_file)
-        dataLen = len(list(reader_file))
-        if dataLen < 2:
-            print("Loading data....")
-            sleep(10.1)
+    print("Loading Data...")
+    sleep(65)
+    #sleep(60)
+ 
     #start GUI
     p2.start()
     p1.join()
